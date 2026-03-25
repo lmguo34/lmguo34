@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票行情看板</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .search-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .search-bar input {
+            flex: 1;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .search-bar button {
+            padding: 10px 20px;
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .search-bar button:hover {
+            background-color: #1976d2;
+        }
+        .search-results {
+            background: white;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .search-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .search-item:last-child {
+            border-bottom: none;
+        }
+        .search-item:hover {
+            background-color: #f5f5f5;
+        }
+        .stock-info {
+            background: white;
+            border-radius: 4px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .info-item {
+            text-align: center;
+        }
+        .info-label {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .info-value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .info-value.up {
+            color: #f5222d;
+        }
+        .info-value.down {
+            color: #23c25b;
+        }
+        .kline-container {
+            background: white;
+            border-radius: 4px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #kline-chart {
+            width: 100%;
+            height: 500px;
+        }
+        .period-selector {
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .period-selector button {
+            margin: 0 5px;
+            padding: 5px 15px;
+            border: 1px solid #2196f3;
+            background: white;
+            color: #2196f3;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .period-selector button.active {
+            background: #2196f3;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>股票行情看板 📈</h1>
+        
+        <div class="search-bar">
+            <input type="text" id="search-input" placeholder="输入股票名称或代码，比如'贵州茅台'或'600519'">
+            <button onclick="search()">搜索</button>
+        </div>
+
+        <div class="search-results" id="search-results" style="display: none;"></div>
+
+        <div class="stock-info" id="stock-info" style="display: none;"></div>
+
+        <div class="kline-container" id="kline-container" style="display: none;">
+            <div class="period-selector">
+                <button class="active" data-period="daily" onclick="changePeriod('daily')">日K</button>
+                <button data-period="weekly" onclick="changePeriod('weekly')">周K</button>
+                <button data-period="monthly" onclick="changePeriod('monthly')">月K</button>
+            </div>
+            <div id="kline-chart"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let myChart = null;
+        let currentCode = null;
+        let currentPeriod = 'daily';
+
+        // 初始化图表
+        document.addEventListener('DOMContentLoaded', function() {
+            myChart = echarts.init(document.getElementById('kline-chart'));
+            document.getElementById('search-input').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    search();
+                }
+            });
+        });
+
+        async function search() {
+            const keyword = document.getElementById('search-input').value.trim();
+            if (!keyword) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/search?keyword=${keyword}`);
+                const result = await response.json();
+                if (result.code !== 0) {
+                    alert(result.msg);
+                    return;
+                }
+
+                const resultsEl = document.getElementById('search-results');
+                resultsEl.style.display = 'block';
+                resultsEl.innerHTML = result.data.map(item => `
+                    <div class="search-item" onclick="selectStock('${item.code}', '${item.name}')">
+                        ${item.name} (${item.code})
+                    </div>
+                `).join('');
+            } catch (e) {
+                alert('搜索失败：' + e.message);
+            }
+        }
+
+        async function selectStock(code, name) {
+            currentCode = code;
+            document.getElementById('search-results').style.display = 'none';
+            
+            // 获取行情
+            try {
+                const response = await fetch(`${API_BASE}/api/quote?code=${code}`);
+                const result = await response.json();
+                if (result.code !== 0) {
+                    alert(result.msg);
+                    return;
+                }
+
+                const data = result.data;
+                const changePercent = parseFloat(data['涨跌幅']);
+                const isUp = changePercent >= 0;
+
+                const infoEl = document.getElementById('stock-info');
+                infoEl.style.display = 'grid';
+                infoEl.innerHTML = `
+                    <div class="info-item">
+                        <div class="info-label">名称</div>
+                        <div class="info-value">${name}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">代码</div>
+                        <div class="info-value">${code}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">当前价</div>
+                        <div class="info-value ${isUp ? 'up' : 'down'}">${data['最新价']}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">涨跌幅</div>
+                        <div class="info-value ${isUp ? 'up' : 'down'}">${isUp ? '+' : ''}${changePercent}%</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">涨跌额</div>
+                        <div class="info-value ${isUp ? 'up' : 'down'}">${isUp ? '+' : ''}${data['涨跌额']}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">成交量</div>
+                        <div class="info-value">${(data['成交量'] / 10000).toFixed(2)} 万手</div>
+                    </div>
+                `;
+
+                // 加载K线
+                loadKline();
+            } catch (e) {
+                alert('获取行情失败：' + e.message);
+            }
+        }
+
+        function changePeriod(period) {
+            currentPeriod = period;
+            document.querySelectorAll('.period-selector button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector(`button[data-period="${period}"]`).classList.add('active');
+            loadKline();
+        }
+
+        async function loadKline() {
+            if (!currentCode) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/kline?code=${currentCode}&period=${currentPeriod}`);
+                const result = await response.json();
+                if (result.code !== 0) {
+                    alert(result.msg);
+                    return;
+                }
+
+                const container = document.getElementById('kline-container');
+                container.style.display = 'block';
+
+                // 绘制K线图
+                const data = result.data;
+                const option = {
+                    title: {
+                        text: result.name + ' K线图',
+                        left: 0
+                    },
+                    tooltip: {
+                        trigger: 'axis',
+                        axisPointer: {
+                            type: 'cross'
+                        }
+                    },
+                    grid: {
+                        left: '10%',
+                        right: '10%',
+                        bottom: '15%'
+                    },
+                    xAxis: {
+                        type: 'category',
+                        data: data.map(item => item[0]),
+                        scale: true,
+                        boundaryGap: false,
+                        axisLabel: {
+                            rotate: 45
+                        }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        scale: true
+                    },
+                    dataZoom: [
+                        {
+                            type: 'inside',
+                            start: 0,
+                            end: 100
+                        },
+                        {
+                            start: 0,
+                            end: 100
+                        }
+                    ],
+                    series: [
+                        {
+                            name: 'K线',
+                            type: 'candlestick',
+                            data: data.map(item => [item[1], item[2], item[3], item[4]]), // 我们返回的数据结构：[日期, 开盘, 最高, 最低, 收盘, 成交量] → ECharts需要：[open, high, low, close]，正好匹配
+                            itemStyle: {
+                                color: '#f5222d', // 下跌红色
+                                color0: '#23c25b', // 上涨绿色
+                                borderColor: '#f5222d',
+                                borderColor0: '#23c25b'
+                            }
+                        }
+                    ]
+                };
+
+                myChart.setOption(option);
+                window.addEventListener('resize', () => myChart.resize());
+            } catch (e) {
+                alert('加载K线失败：' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
